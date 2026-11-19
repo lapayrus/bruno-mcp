@@ -4,4 +4,4 @@ coverage
 .DS_Store
 *.log
 
-/docs
+/docsbun.lock
