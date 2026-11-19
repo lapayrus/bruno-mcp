@@ -13,6 +13,7 @@ import {
   type CollectionFormat
 } from './readCollection.js';
 import { listEnvironmentFiles, type EnvironmentFile } from './environments.js';
+import { getPolicy } from './policy.js';
 
 const collectionNameFromConfig = (collectionPath: string): string => {
   const brunoJsonPath = path.join(collectionPath, 'bruno.json');
@@ -130,7 +131,7 @@ export class CollectionRegistry {
     const configured = this.collections.find((c) => c.path === target);
     if (configured) return configured;
 
-    if (!isCollectionDir(target)) return null;
+    if (getPolicy().strictScope || !isCollectionDir(target)) return null;
     return {
       path: target,
       name: collectionNameFromConfig(target),

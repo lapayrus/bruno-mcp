@@ -5,8 +5,11 @@ import { isMap, isSeq, parseDocument, type YAMLMap, type YAMLSeq } from 'yaml';
 
 import type { EnvironmentVariable } from '../types.js';
 import { ENVIRONMENTS_DIR, detectFormat, FORMAT_FILES, type CollectionFormat } from './readCollection.js';
+import { getPolicy, isSensitiveKey, redactDeep } from './policy.js';
 
 export const REDACTED = '<redacted>';
+
+const redactValueIfOn = (value: unknown): unknown => (getPolicy().redact ? redactDeep(value) : value);
 
 export interface EnvironmentFile {
   name: string;
@@ -32,7 +35,7 @@ export const readEnvironmentVariables = async (env: EnvironmentFile): Promise<En
   const variables: any[] = Array.isArray(parsed?.variables) ? parsed.variables : [];
   return variables.map((v) => ({
     name: String(v.name),
-    value: v.secret ? REDACTED : v.value ?? null,
+    value: v.secret || (getPolicy().redact && isSensitiveKey(String(v.name))) ? REDACTED : redactValueIfOn(v.value ?? null),
     enabled: v.enabled !== false,
     secret: Boolean(v.secret)
   }));

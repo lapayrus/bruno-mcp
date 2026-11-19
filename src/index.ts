@@ -5,11 +5,13 @@ import { parseArgs, validateConfig } from './config.js';
 import { redirectConsoleLogToStderr, startStdioServer } from './transports/stdio.js';
 import { discoverCollections } from './core/discover.js';
 import * as log from './log.js';
+import { setPolicy } from './core/policy.js';
 
 redirectConsoleLogToStderr();
 
-const { config, verbose } = parseArgs(hideBin(process.argv));
+const { config, verbose, policy } = parseArgs(hideBin(process.argv));
 log.setVerbose(verbose);
+setPolicy(policy);
 
 const errors = validateConfig(config);
 if (errors.length > 0) {

@@ -1,6 +1,7 @@
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 
 import { parseRequestFile } from '../core/readCollection.js';
+import { getPolicy, redactDeep } from '../core/policy.js';
 import {
   collectionPathSchema,
   errorText,
@@ -44,7 +45,10 @@ export const registerGetRequestTool = (server: McpServer, { registry }: ToolCont
       try {
         return textResult({
           relativePath: requestPath,
-          request: parseRequestFile(resolved.path, resolved.format)
+          request: (() => {
+            const parsed = parseRequestFile(resolved.path, resolved.format);
+            return getPolicy().redact ? redactDeep(parsed) : parsed;
+          })()
         });
       } catch (err: any) {
         return textResult(

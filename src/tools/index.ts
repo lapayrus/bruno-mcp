@@ -1,5 +1,6 @@
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 
+import { getPolicy } from '../core/policy.js';
 import type { ToolContext } from './helpers.js';
 import { registerListCollectionsTool } from './list-collections.js';
 import { registerListRequestsTool } from './list-requests.js';
@@ -29,6 +30,10 @@ export const registerTools = (server: McpServer, ctx: ToolContext): void => {
   registerGetEnvironmentTool(server, ctx);
   registerListFoldersTool(server, ctx);
   registerGetCollectionStatsTool(server, ctx);
+
+  // --read-only: nothing that writes, moves or deletes files, or adds scripts that later run.
+  if (getPolicy().readOnly) return;
+
   registerSetEnvironmentVariableTool(server, ctx);
   registerRemoveEnvironmentVariableTool(server, ctx);
   registerCreateCollectionTool(server, ctx);

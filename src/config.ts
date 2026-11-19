@@ -3,10 +3,12 @@ import yargs from 'yargs/yargs';
 
 import { isCollectionDir, isWorkspaceDir } from './core/discover.js';
 import type { DiscoveryConfig } from './types.js';
+import type { Policy } from './core/policy.js';
 
 export interface ParsedArgs {
   config: DiscoveryConfig;
   verbose: boolean;
+  policy: Policy;
 }
 
 export const parseArgs = (argv: string[]): ParsedArgs => {
@@ -41,10 +43,35 @@ export const parseArgs = (argv: string[]): ParsedArgs => {
       describe: 'Log debug info to stderr',
       default: false
     })
+    .option('read-only', {
+      type: 'boolean',
+      describe: 'Register only the read and run tools (no file writes, moves, deletes or script edits).',
+      default: false
+    })
+    .option('redact', {
+      type: 'boolean',
+      describe: 'Strip secrets from tool results: headers (except content-type), token-like JSON keys, JWT/Bearer strings.',
+      default: false
+    })
+    .option('max-body-chars', {
+      type: 'number',
+      describe: 'Cap response bodies returned to the caller (0 = no cap).',
+      default: 0
+    })
+    .option('allow-mutations-in', {
+      type: 'string',
+      describe: 'Comma-separated environments where non-GET requests may run; every other environment is GET-only.'
+    })
+    .option('strict-scope', {
+      type: 'boolean',
+      describe: 'Resolve only the configured/discovered collections, never an arbitrary path holding bruno.json.',
+      default: false
+    })
     .help()
     .alias('h', 'help')
     .parseSync();
 
+  const mutationEnvs = parsed['allow-mutations-in'];
   return {
     config: {
       explicitCollections: (parsed.collection || []).map((p) => path.resolve(String(p))),
@@ -52,7 +79,15 @@ export const parseArgs = (argv: string[]): ParsedArgs => {
       cwdDiscovery: !!parsed['cwd-discovery'],
       autoDiscovery: !!parsed['auto-discovery']
     },
-    verbose: !!parsed.verbose
+    verbose: !!parsed.verbose,
+    policy: {
+      readOnly: !!parsed['read-only'],
+      redact: !!parsed.redact,
+      maxBodyChars: Math.max(0, Number(parsed['max-body-chars']) || 0),
+      mutationEnvs:
+        mutationEnvs === undefined ? null : String(mutationEnvs).split(',').map((e) => e.trim()).filter(Boolean),
+      strictScope: !!parsed['strict-scope']
+    }
   };
 };
 

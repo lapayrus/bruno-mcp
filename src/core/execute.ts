@@ -8,6 +8,7 @@ import { createRequire } from 'node:module';
 import * as log from '../log.js';
 import type { CollectionRunOptions, VariableOverrides } from '../types.js';
 import { detectFormat, type CollectionFormat } from './readCollection.js';
+import { assertSafeArg, getPolicy, maskString, redactBody, redactDeep, redactHeaders } from './policy.js';
 
 const require = createRequire(import.meta.url);
 const BRU_BIN: string = require.resolve('@usebruno/cli/bin/bru.js');
@@ -45,7 +46,12 @@ const buildRunArgs = (
   { environment, variables, iterations, dataFile, parallel, bail }: CollectionRunOptions = {},
   reportPath: string
 ): string[] => {
-  const args = ['run', ...paths, '--reporter-json', reportPath];
+  for (const p of paths) assertSafeArg(p, 'request/folder path');
+  if (environment) assertSafeArg(environment, 'environment');
+  if (dataFile) assertSafeArg(dataFile, 'data file');
+
+  // Scripts always run in the QuickJS sandbox: the Node VM would let them require child_process.
+  const args = ['run', ...paths, '--reporter-json', reportPath, '--sandbox', 'safe'];
 
   if (environment) args.push('--env', String(environment));
   if (iterations && !dataFile) args.push('--iteration-count', String(iterations));
@@ -61,6 +67,11 @@ const buildRunArgs = (
       if (String(name).includes('=')) {
         throw new Error(`variable name must not contain '=': ${name}`);
       }
+      assertSafeArg(String(name), 'variable name');
+      // Overrides are literal: interpolation here could pull {{process.env.*}} into a request.
+      if (String(value).includes('{{')) {
+        throw new Error(`variable "${name}" must be a literal value, not a {{template}}`);
+      }
       args.push('--env-var', `${name}=${value}`);
     }
   }
@@ -73,21 +84,26 @@ const formatBody = (body: unknown): string | null => {
   return typeof body === 'string' ? body : JSON.stringify(body);
 };
 
+// With --redact, nothing secret-bearing leaves the server: headers, token keys, JWT/Bearer strings.
+const headersOut = (headers: unknown) => (getPolicy().redact ? redactHeaders(headers) : headers || null);
+const valueOut = <T>(value: T): T => (getPolicy().redact ? (redactDeep(value) as T) : value);
+const textOut = (text: string | null): string | null => (text != null && getPolicy().redact ? maskString(text) : text);
+
 const formatResponse = (response: any) => {
   if (!response) return null;
   return {
     status: response.status,
     statusText: response.statusText,
     responseTimeMs: response.responseTime,
-    headers: response.headers || null,
-    body: formatBody(response.data)
+    headers: headersOut(response.headers),
+    body: redactBody(formatBody(response.data))
   };
 };
 
 const formatResultEntry = (entry: any) => {
   const rawRequest = entry && entry.request ? entry.request : null;
   const request = rawRequest
-    ? { method: rawRequest.method, url: rawRequest.url ?? null, headers: rawRequest.headers || null }
+    ? { method: rawRequest.method, url: textOut(rawRequest.url ?? null), headers: headersOut(rawRequest.headers) }
     : null;
   const response = formatResponse(entry && entry.response ? entry.response : null);
   const responseOk = response && typeof response.status === 'number' && response.status > 0;
@@ -96,9 +112,9 @@ const formatResultEntry = (entry: any) => {
     ok: Boolean(responseOk),
     request,
     response,
-    assertionResults: entry ? entry.assertionResults : null,
-    testResults: entry ? entry.testResults : null,
-    error: entry && entry.error ? entry.error : null
+    assertionResults: entry ? valueOut(entry.assertionResults) : null,
+    testResults: entry ? valueOut(entry.testResults) : null,
+    error: entry && entry.error ? valueOut(entry.error) : null
   };
 };
 
@@ -151,7 +167,7 @@ export const formatResult = ({ exitCode, report, stderr, parseError }: RawRunRes
   const { entries, summary } = normalizeReport(report);
   const entry = formatResultEntry(entries.length > 0 ? entries[0] : null);
   const error =
-    entry.error ?? (entries.length === 0 ? formatRunFailure(exitCode, stderr, parseError, report != null) : null);
+    entry.error ?? (entries.length === 0 ? textOut(formatRunFailure(exitCode, stderr, parseError, report != null)) : null);
   return {
     exitCode,
     ok: Boolean(exitCode === 0 && entry.ok),
@@ -236,7 +252,7 @@ export const formatRunResult = (
     })
   );
 
-  return {
+  return valueOut({
     exitCode,
     ok: exitCode === 0 && ran,
     summary: {
@@ -255,7 +271,7 @@ export const formatRunResult = (
     },
     requests,
     error: ran ? null : emptyRunError(raw, iterations.length)
-  };
+  });
 };
 
 interface RunBruArgs {
@@ -282,8 +298,11 @@ const runBru = async ({
   log.debug(`spawn: node ${BRU_BIN} ${args.join(' ')} (cwd=${collectionPath})`);
 
   const stderrChunks: Buffer[] = [];
+  // Minimal env: bru exposes process.env to requests and scripts, so the server's own environment
+  // (API keys, tokens) must not reach it. The collection's .env is still loaded by bru itself.
   const child = spawn(process.execPath, [BRU_BIN, ...args], {
     cwd: collectionPath,
+    env: { PATH: process.env.PATH ?? '', HOME: process.env.HOME ?? '' },
     stdio: ['ignore', 'ignore', 'pipe']
   });
 

@@ -5,6 +5,7 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 
 import { COLLECTION_TIMEOUT_MS, runCollection } from '../core/execute.js';
+import { getPolicy, isMutation, mutationBlockedReason } from '../core/policy.js';
 import {
   collectionPathSchema,
   errorText,
@@ -25,7 +26,17 @@ const isDataFile = (filePath: string): boolean => {
   }
 };
 
-export const registerRunCollectionTool = (server: McpServer, { registry }: ToolContext): void => {
+// Real paths, so a symlink can't point a data file outside the collection.
+const isInsideCollection = (collectionPath: string, filePath: string): boolean => {
+  try {
+    const rel = path.relative(fs.realpathSync(collectionPath), fs.realpathSync(filePath));
+    return rel.length > 0 && !rel.startsWith('..') && !path.isAbsolute(rel);
+  } catch (_) {
+    return false;
+  }
+};
+
+export const registerRunCollectionTool =(server: McpServer, { registry }: ToolContext): void => {
   server.registerTool(
     'run_collection',
     {
@@ -102,6 +113,16 @@ export const registerRunCollectionTool = (server: McpServer, { registry }: ToolC
         }
       }
 
+      // Every request the run would send; a selection that matches no listed request counts as a mutation.
+      const listed = registry.listRequests(collection.path) || [];
+      const mutating = (requests && requests.length > 0 ? requests : ['']).flatMap((p) => {
+        const prefix = p.replace(/\/+$/, '');
+        const hits = prefix ? listed.filter((r) => r.relativePath === prefix || r.relativePath.startsWith(`${prefix}/`)) : listed;
+        return hits.length === 0 ? [p] : hits.filter((r) => isMutation(r.method)).map((r) => r.relativePath);
+      });
+      const blocked = mutationBlockedReason(environment, mutating);
+      if (blocked) return textResult({ error: blocked }, true);
+
       const dataFilePath = dataFile ? path.resolve(collection.path, dataFile) : undefined;
       if (dataFilePath && !isDataFile(dataFilePath)) {
         return textResult(
@@ -111,6 +132,10 @@ export const registerRunCollectionTool = (server: McpServer, { registry }: ToolC
           },
           true
         );
+      }
+
+      if (dataFilePath && getPolicy().strictScope && !isInsideCollection(collection.path, dataFilePath)) {
+        return textResult({ error: `Data file must be inside the collection (--strict-scope): ${dataFile}` }, true);
       }
 
       try {
