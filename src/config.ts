@@ -9,12 +9,13 @@ export interface ParsedArgs {
   config: DiscoveryConfig;
   verbose: boolean;
   policy: Policy;
+  inheritEnv: boolean;
 }
 
 export const parseArgs = (argv: string[]): ParsedArgs => {
   const parsed = yargs(argv)
     .scriptName('bruno-mcp')
-    .usage('Usage: $0 [--collection <path>] [--workspace <path>] [--no-cwd-discovery] [--no-auto-discovery]')
+    .usage('Usage: $0 [--collection <path>] [--workspace <path>] [--no-cwd-discovery] [--no-auto-discovery] [--inherit-env]')
     .option('collection', {
       alias: 'c',
       type: 'array',
@@ -37,6 +38,12 @@ export const parseArgs = (argv: string[]): ParsedArgs => {
       describe:
         'Fall back on Bruno desktop preferences when nothing else is scoped (exposes every collection/workspace you last had open). On by default; pass --no-auto-discovery to disable and expose only what you explicitly scope.',
       default: true
+    })
+    .option('inherit-env', {
+      type: 'boolean',
+      describe:
+        'Give requests this server\'s whole environment as {{process.env.*}}. Off by default, so a request can\'t read your shell secrets; the collection\'s .env file is always available.',
+      default: false
     })
     .option('verbose', {
       type: 'boolean',
@@ -67,6 +74,7 @@ export const parseArgs = (argv: string[]): ParsedArgs => {
       describe: 'Resolve only the configured/discovered collections, never an arbitrary path holding bruno.json.',
       default: false
     })
+    .epilogue('To add this server to Claude Code, Cursor, VS Code, Codex or Claude Desktop, run `npx @usebruno/mcp setup`.')
     .help()
     .alias('h', 'help')
     .parseSync();
@@ -80,6 +88,7 @@ export const parseArgs = (argv: string[]): ParsedArgs => {
       autoDiscovery: !!parsed['auto-discovery']
     },
     verbose: !!parsed.verbose,
+    inheritEnv: !!parsed['inherit-env'],
     policy: {
       readOnly: !!parsed['read-only'],
       redact: !!parsed.redact,
