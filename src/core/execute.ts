@@ -351,19 +351,29 @@ const runBru = async ({
   const child = spawn(process.execPath, [...preload, BRU_BIN, ...args], {
     cwd: collectionPath,
     env: bruEnv(),
-    stdio: ['ignore', 'ignore', 'pipe']
+    stdio: ['ignore', 'ignore', 'pipe'],
+    // A new session has no controlling terminal, so nothing bru starts (such as an interactive login shell)
+    // can take the MCP client's terminal away from it.
+    detached: true
   });
+
+  // A detached bru is its own process group: kill the whole group, and don't let it outlive the server.
+  const killGroup = (): void => {
+    try { if (child.pid) process.kill(-child.pid, 'SIGKILL'); } catch (_) { }
+  };
+  process.once('exit', killGroup);
 
   child.stderr.on('data', (chunk) => stderrChunks.push(chunk));
 
   const exitCode = await new Promise<number | null>((resolve, reject) => {
     // Kill the spawned bru process if it becomes unresponsive
     const timer = setTimeout(() => {
-      child.kill('SIGKILL');
+      killGroup();
       reject(new Error(`bru run timed out after ${timeoutMs}ms`));
     }, timeoutMs);
-    child.on('error', (err) => { clearTimeout(timer); reject(err); });
-    child.on('exit', (code) => { clearTimeout(timer); resolve(code); });
+    const done = (): void => { clearTimeout(timer); process.removeListener('exit', killGroup); };
+    child.on('error', (err) => { done(); reject(err); });
+    child.on('exit', (code) => { done(); resolve(code); });
   });
 
   const stderr = Buffer.concat(stderrChunks).toString('utf8');
