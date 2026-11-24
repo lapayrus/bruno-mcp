@@ -95,8 +95,13 @@ export interface TestHttpServer {
 
 const HOLD_TIMEOUT_MS = 2000;
 
-// `/missing` answers 404, everything else 200; every request path is recorded in `hits`.
-export const startHttpServer = async (): Promise<TestHttpServer> => {
+// By default `/missing` answers 404 and everything else 200.
+export const startHttpServer = async (
+  reply: (request: ReceivedRequest) => { status: number; body: unknown } = ({ url }) => ({
+    status: url === '/missing' ? 404 : 200,
+    body: { path: url }
+  })
+): Promise<TestHttpServer> => {
   const held = new Set<() => void>();
   let inFlight = 0;
 
@@ -111,15 +116,17 @@ export const startHttpServer = async (): Promise<TestHttpServer> => {
   });
 
   const handle = (req: http.IncomingMessage, res: http.ServerResponse, body: string) => {
-    api.hits.push(req.url || '');
-    api.received.push({ method: req.method || '', url: req.url || '', authorization: req.headers.authorization, body });
+    const request = { method: req.method || '', url: req.url || '', authorization: req.headers.authorization, body };
+    api.hits.push(request.url);
+    api.received.push(request);
     inFlight += 1;
     api.maxInFlight = Math.max(api.maxInFlight, inFlight);
 
     const respond = () => {
       inFlight -= 1;
-      res.writeHead(req.url === '/missing' ? 404 : 200, { 'content-type': 'application/json' });
-      res.end(JSON.stringify({ path: req.url }));
+      const { status, body } = reply(request);
+      res.writeHead(status, { 'content-type': 'application/json' });
+      res.end(JSON.stringify(body));
     };
 
     if (inFlight < api.holdUntilInFlight) {

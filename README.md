@@ -156,7 +156,7 @@ A collection is addressed by its **path**, not by an id: pass the `path` from `l
 
 ### What ends up in tool output
 
-`execute_request` returns what the Bruno CLI reports, carrying only the CLI's own masking:
+By default, `execute_request` returns what the Bruno CLI reports with the CLI's own masking:
 
 - **Request** headers whose name is known to carry credentials (`Authorization`, `Cookie`, `X-Api-Key`, `X-Auth-Token`, …) are masked; a `Bearer`/`Basic` scheme is kept, the value is not.
 - Values the run knows to be secrets (`vars:secret` in the selected environment, values from `.env`) are scrubbed everywhere they appear, including URLs and bodies.
@@ -165,9 +165,9 @@ Everything else comes back as-is, including **response headers**: a `Set-Cookie`
 
 `get_environment` replaces the value of every variable marked secret with `<redacted>`. Non-secret values are returned as stored on disk, so a credential kept in a plain variable is returned as-is.
 
-`run_collection` leaves headers and bodies out, but failed assertion/test messages, per-request errors, and the run `error` carry only the CLI masking above, so an assertion on a response value can echo that value back.
+`run_collection` leaves headers and bodies out. By default, failed assertion and test messages and errors can echo values that the CLI leaves unmasked.
 
-Response bodies are not truncated by this server. Every MCP client applies its own ceiling, so a second cap here would only lose bodies the client would have accepted.
+Use `--redact` to strip all execution-result headers except `Content-Type` and mask common credential patterns in tool output. Use `--max-body-chars` to cap returned response bodies.
 
 ### Writing to collections
 
@@ -205,10 +205,29 @@ Usage: bruno-mcp [--collection <path>] [--workspace <path>]
 | `--no-cwd-discovery` | Disable the CWD walk-up step. |
 | `--no-auto-discovery` | Disable the Bruno desktop preferences fallback. |
 | `--inherit-env` | Pass the server's whole environment, including variables exported in your shell startup files (`~/.zshrc`, `~/.bashrc`, …), to requests as `{{process.env.*}}`. Off by default: requests only see system variables (`PATH`, `HOME`, proxies, CA certificates, Vault address) plus the collection's own `.env` file, so an agent-written request can't read secrets from your shell. Turn it on if your environments resolve external secrets with credentials from the shell (`VAULT_TOKEN`, `AWS_*`). |
+| `--read-only` | Hide tools that edit collection files. Execution tools remain available. |
+| `--redact` | Strip execution-result headers except `Content-Type` and mask common credential patterns in tool output. |
+| `--max-body-chars <n>` | Truncate response body content after `n` characters. Defaults to `0` for no limit. |
+| `--allow-mutations-in <envs>` | Allow methods other than `GET`, `HEAD`, and `OPTIONS` only in the named, comma-separated environments. |
+| `--strict-scope` | Require registered collections and keep collection-run data files inside the collection. |
 | `--verbose` | Log debug info to stderr. |
 | `--help`, `-h` | Show help. |
 
 `bruno-mcp setup` is the separate install command described in [Set up from your terminal](#set-up-from-your-terminal); it takes `--client <id>` (`claude-code`, `claude-desktop`, `cursor`, `vscode`, `codex`; repeatable) and `--all`.
+
+## Test project workflows
+
+```sh
+npm ci
+npm test -- --runInBand tests/tools/project-workflows.test.ts
+```
+
+The scenarios use temporary collections and a local HTTP API. They run through the MCP tools and the real Bruno CLI with no external services or credentials.
+
+- **Orders API** builds a workspace collection in each format (`.bru` and `.yml`), configures a QA environment, and uses a one-run bearer token override. Two CSV rows each create an order and read it back using the ID captured by a post-response script. The workflow checks responses, assertions, and a rejected token.
+- **Catalog GraphQL API** authors a parameterized query, copies it into an OpenCollection YAML collection, verifies its test and wire payload, then removes the test script and the retired source request.
+
+Run `npm test -- --runInBand` for the full suite, including the hardening policies and collection-run failure cases.
 
 ## Links
 
