@@ -4,8 +4,10 @@ import fs from 'node:fs';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 
+import { isInside } from '../core/collections.js';
 import { COLLECTION_TIMEOUT_MS, runCollection } from '../core/execute.js';
-import { getPolicy, isMutation, mutationBlockedReason } from '../core/policy.js';
+import { getPolicy, mutationBlockedReason, requiresAllowedEnvironment } from '../core/policy.js';
+import { toPosixPath } from '../core/readCollection.js';
 import {
   collectionPathSchema,
   errorText,
@@ -29,14 +31,13 @@ const isDataFile = (filePath: string): boolean => {
 // Real paths, so a symlink can't point a data file outside the collection.
 const isInsideCollection = (collectionPath: string, filePath: string): boolean => {
   try {
-    const rel = path.relative(fs.realpathSync(collectionPath), fs.realpathSync(filePath));
-    return rel.length > 0 && !rel.startsWith('..') && !path.isAbsolute(rel);
+    return isInside(fs.realpathSync(collectionPath), fs.realpathSync(filePath));
   } catch (_) {
     return false;
   }
 };
 
-export const registerRunCollectionTool =(server: McpServer, { registry }: ToolContext): void => {
+export const registerRunCollectionTool = (server: McpServer, { registry }: ToolContext): void => {
   server.registerTool(
     'run_collection',
     {
@@ -66,7 +67,8 @@ export const registerRunCollectionTool =(server: McpServer, { registry }: ToolCo
           .string()
           .optional()
           .describe(
-            'Path to a .csv or .json data file, absolute or relative to the collection directory. Each row becomes the variables for one iteration.'
+            'Path to a .csv or .json data file, absolute or relative to the collection directory. ' +
+              'Each row becomes the variables for one iteration. Strict scope requires the file to be inside the collection.'
           ),
         parallel: z.boolean().optional().describe('Run iterations in parallel instead of one after another.'),
         bail: z.boolean().optional().describe('Stop the run at the first failing request, assertion, or test.'),
@@ -92,9 +94,13 @@ export const registerRunCollectionTool =(server: McpServer, { registry }: ToolCo
         return textResult(unknownCollectionMessage(registry, collectionPath), true);
       }
 
-      const unknownPaths = (requests || []).filter(
-        (p) => !registry.resolveRequestPath(collectionPath, p) && !registry.resolveFolderPath(collectionPath, p)
-      );
+      const paths: string[] = [];
+      const unknownPaths: string[] = [];
+      for (const request of requests ?? []) {
+        const target = registry.resolveRequestPath(collection.path, request)?.path ?? registry.resolveFolderPath(collection.path, request);
+        if (target) paths.push(toPosixPath(path.relative(collection.path, target)));
+        else unknownPaths.push(request);
+      }
       if (unknownPaths.length > 0) {
         return textResult(
           {
@@ -113,16 +119,6 @@ export const registerRunCollectionTool =(server: McpServer, { registry }: ToolCo
         }
       }
 
-      // Every request the run would send; a selection that matches no listed request counts as a mutation.
-      const listed = registry.listRequests(collection.path) || [];
-      const mutating = (requests && requests.length > 0 ? requests : ['']).flatMap((p) => {
-        const prefix = p.replace(/\/+$/, '');
-        const hits = prefix ? listed.filter((r) => r.relativePath === prefix || r.relativePath.startsWith(`${prefix}/`)) : listed;
-        return hits.length === 0 ? [p] : hits.filter((r) => isMutation(r.method)).map((r) => r.relativePath);
-      });
-      const blocked = mutationBlockedReason(environment, mutating);
-      if (blocked) return textResult({ error: blocked }, true);
-
       const dataFilePath = dataFile ? path.resolve(collection.path, dataFile) : undefined;
       if (dataFilePath && !isDataFile(dataFilePath)) {
         return textResult(
@@ -139,9 +135,22 @@ export const registerRunCollectionTool =(server: McpServer, { registry }: ToolCo
       }
 
       try {
+        const blocked = mutationBlockedReason(environment, () => {
+          const listed = registry.listRequests(collection.path) || [];
+          return (paths.length ? paths : ['']).flatMap((selected) => {
+            const matches = selected
+              ? listed.filter(({ relativePath }) => relativePath === selected || relativePath.startsWith(`${selected}/`))
+              : listed;
+            return matches.length
+              ? matches.filter(({ method }) => requiresAllowedEnvironment(method)).map(({ relativePath }) => relativePath)
+              : [selected || collection.name];
+          });
+        });
+        if (blocked) return textResult({ error: blocked }, true);
+
         const result = await runCollection({
           collectionPath: collection.path,
-          paths: requests,
+          paths,
           environment,
           variables,
           iterations,

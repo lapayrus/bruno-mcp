@@ -7,6 +7,7 @@ import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 import type { CollectionRegistry } from '../core/collections.js';
 import { collectionsFromWorkspace, isWorkspaceDir } from '../core/discover.js';
 import type { EnvironmentFile } from '../core/environments.js';
+import { getPolicy } from '../core/policy.js';
 import { SCRIPT_TYPES } from '../core/requests.js';
 import type { RegisteredCollection } from '../types.js';
 
@@ -28,7 +29,7 @@ export const textResult = (obj: unknown, isError = false): CallToolResult => ({
 export const unknownCollectionMessage = (registry: CollectionRegistry, collectionPath: string) => {
   const target = path.resolve(String(collectionPath || '.'));
 
-  if (isWorkspaceDir(target)) {
+  if (registry.canAccessWorkspace(target) && isWorkspaceDir(target)) {
     const members = collectionsFromWorkspace(target).map((c) => ({
       name: c.nameInWorkspace || path.basename(c.path),
       path: c.path
@@ -46,7 +47,9 @@ export const unknownCollectionMessage = (registry: CollectionRegistry, collectio
     error: `No Bruno collection at: ${collectionPath}`,
     hint: registry.scoped
       ? 'This server is limited to the collections passed with --collection/--workspace, listed below. Ask the user to add the collection to the server config to use it.'
-      : 'collectionPath is the directory holding bruno.json or opencollection.yml. Any collection on this machine works; the list below is only what this server was configured or discovered to see.',
+      : getPolicy().strictScope
+        ? 'Strict scope limits access to the registered collections, listed below. Add the collection to the server config to use it.'
+        : 'collectionPath is the directory holding bruno.json or opencollection.yml. Any collection on this machine works; the list below is only what this server was configured or discovered to see.',
     availableCollections: registry.list().map((c) => ({ name: c.name, path: c.path }))
   };
 };
@@ -76,7 +79,7 @@ export const variablesSchema = () =>
     .record(z.string(), z.union([z.string(), z.number(), z.boolean()]))
     .optional()
     .describe(
-      'Override (or add) environment variables for this run, replacing any values from the environment.'
+      'Override environment variables for this run. Values must be literals. Bruno template expressions such as {{baseUrl}} are rejected.'
     );
 
 const fileLocks = new Map<string, Promise<unknown>>();

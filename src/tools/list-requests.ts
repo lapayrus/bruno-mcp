@@ -2,6 +2,7 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 
 import { filterRequests } from '../core/collections.js';
+import { getPolicy, maskString } from '../core/policy.js';
 import { collectionPathSchema, textResult, unknownCollectionMessage, type ToolContext } from './helpers.js';
 
 export const registerListRequestsTool = (server: McpServer, { registry }: ToolContext): void => {
@@ -34,12 +35,14 @@ export const registerListRequestsTool = (server: McpServer, { registry }: ToolCo
         return textResult(unknownCollectionMessage(registry, collectionPath), true);
       }
       const all = registry.listRequests(collectionPath) || [];
-      const requests = filterRequests(all, { search, method });
+      const { redact } = getPolicy();
+      const visible = redact ? all.map((request) => ({ ...request, url: request.url && maskString(request.url) })) : all;
+      const requests = filterRequests(visible, { search, method });
       const noMatch = (search || method) && requests.length === 0 && all.length > 0;
       return textResult({
         total: all.length,
         count: requests.length,
-        filter: { search: search || null, method: method || null },
+        filter: { search: search ? (redact ? maskString(search) : search) : null, method: method || null },
         ...(noMatch
           ? { hint: `No requests matched the filter. Call list_requests without "search"/"method" to see all ${all.length}.` }
           : {}),

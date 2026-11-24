@@ -21,9 +21,8 @@ export const registerListCollectionsTool = (server: McpServer, { registry }: Too
           .string()
           .optional()
           .describe(
-            'Absolute path to a Bruno workspace folder (contains workspace.yml) to list collections from that workspace specifically. ' +
-              'Any workspace on this machine works, so a path the user names in conversation can be passed straight through, ' +
-              'unless the server was started with --collection/--workspace: then only those workspaces. ' +
+            'Absolute path to a Bruno workspace folder (contains workspace.yml). ' +
+              'Explicit scoping and --strict-scope limit access to registered workspaces. ' +
               'Leave empty to list all collections the server knows about.'
           ),
         search: z
@@ -42,11 +41,11 @@ export const registerListCollectionsTool = (server: McpServer, { registry }: Too
       let workspace: { name: string; path: string } | null = null;
       let all;
       if (workspacePath) {
-        if (registry.scoped && !registry.isConfiguredWorkspace(workspacePath)) {
+        if (!registry.canAccessWorkspace(workspacePath)) {
           return textResult(
             {
               error: `This server is not configured for the workspace: ${workspacePath}`,
-              hint: 'It is limited to the collections and workspaces passed with --collection/--workspace. Omit workspacePath to list them, or ask the user to add this workspace to the server config.'
+              hint: 'Omit workspacePath to list registered collections, or add the workspace to the server config.'
             },
             true
           );

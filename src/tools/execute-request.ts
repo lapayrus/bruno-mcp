@@ -4,7 +4,8 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 
 import { executeRequest } from '../core/execute.js';
-import { isMutation, mutationBlockedReason } from '../core/policy.js';
+import { mutationBlockedReason, requiresAllowedEnvironment } from '../core/policy.js';
+import { scanRequest, toPosixPath } from '../core/readCollection.js';
 import {
   collectionPathSchema,
   errorText,
@@ -66,13 +67,14 @@ export const registerExecuteRequestTool = (server: McpServer, { registry }: Tool
         }
       }
 
-      // An unknown method counts as a mutation, so a parse gap can't slip a write past the policy.
-      const relativePath = path.relative(collection.path, resolved.path);
-      const info = (registry.listRequests(collection.path) || []).find((r) => r.relativePath === relativePath);
-      const blocked = mutationBlockedReason(environment, !info || isMutation(info.method) ? [requestPath] : []);
-      if (blocked) return textResult({ error: blocked }, true);
-
       try {
+        const relativePath = toPosixPath(path.relative(collection.path, resolved.path));
+        const blocked = mutationBlockedReason(environment, () => {
+          const method = scanRequest(resolved.path, resolved.format)?.method;
+          return requiresAllowedEnvironment(method) ? [relativePath] : [];
+        });
+        if (blocked) return textResult({ error: blocked }, true);
+
         const result = await executeRequest({
           collectionPath: collection.path,
           requestPath: relativePath,

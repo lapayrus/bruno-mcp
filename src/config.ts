@@ -52,12 +52,12 @@ export const parseArgs = (argv: string[]): ParsedArgs => {
     })
     .option('read-only', {
       type: 'boolean',
-      describe: 'Register only the read and run tools (no file writes, moves, deletes or script edits).',
+      describe: 'Hide authoring tools and keep script-driven variable updates in memory. Requests can still run.',
       default: false
     })
     .option('redact', {
       type: 'boolean',
-      describe: 'Strip secrets from tool results: headers (except content-type), token-like JSON keys, JWT/Bearer strings.',
+      describe: 'Hide execution headers except content-type and mask common credential patterns in tool results.',
       default: false
     })
     .option('max-body-chars', {
@@ -67,11 +67,11 @@ export const parseArgs = (argv: string[]): ParsedArgs => {
     })
     .option('allow-mutations-in', {
       type: 'string',
-      describe: 'Comma-separated environments where non-GET requests may run; every other environment is GET-only.'
+      describe: 'Comma-separated environments exempt from the declared-method check. Only GET, HEAD and OPTIONS pass the check elsewhere.'
     })
     .option('strict-scope', {
       type: 'boolean',
-      describe: 'Resolve only the configured/discovered collections, never an arbitrary path holding bruno.json.',
+      describe: 'Limit access to registered collections and workspaces. Keep run data files in the collection and new collections in a registered workspace.',
       default: false
     })
     .epilogue('To add this server to Claude Code, Cursor, VS Code, Codex or Claude Desktop, run `npx @usebruno/mcp setup`.')

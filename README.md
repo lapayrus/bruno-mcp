@@ -167,7 +167,7 @@ Everything else comes back as-is, including **response headers**: a `Set-Cookie`
 
 `run_collection` leaves headers and bodies out. By default, failed assertion and test messages and errors can echo values that the CLI leaves unmasked.
 
-Use `--redact` to strip all execution-result headers except `Content-Type` and mask common credential patterns in tool output. Use `--max-body-chars` to cap returned response bodies.
+Use `--redact` to strip execution-result headers except `Content-Type` and mask common credential patterns, including sensitive query values in request listings. Free-form data can still contain credentials. Use `--max-body-chars` to cap returned response bodies. Verbose CLI diagnostics omit per-run variable values.
 
 ### Writing to collections
 
@@ -205,15 +205,17 @@ Usage: bruno-mcp [--collection <path>] [--workspace <path>]
 | `--no-cwd-discovery` | Disable the CWD walk-up step. |
 | `--no-auto-discovery` | Disable the Bruno desktop preferences fallback. |
 | `--inherit-env` | Pass the server's whole environment, including variables exported in your shell startup files (`~/.zshrc`, `~/.bashrc`, …), to requests as `{{process.env.*}}`. Off by default: requests only see system variables (`PATH`, `HOME`, proxies, CA certificates, Vault address) plus the collection's own `.env` file, so an agent-written request can't read secrets from your shell. Turn it on if your environments resolve external secrets with credentials from the shell (`VAULT_TOKEN`, `AWS_*`). |
-| `--read-only` | Hide tools that edit collection files. Execution tools remain available. |
+| `--read-only` | Hide authoring tools and keep script-driven variable updates in memory. The execution tools can still send requests. |
 | `--redact` | Strip execution-result headers except `Content-Type` and mask common credential patterns in tool output. |
 | `--max-body-chars <n>` | Truncate response body content after `n` characters. Defaults to `0` for no limit. |
-| `--allow-mutations-in <envs>` | Allow methods other than `GET`, `HEAD`, and `OPTIONS` only in the named, comma-separated environments. |
-| `--strict-scope` | Require registered collections and keep collection-run data files inside the collection. |
+| `--allow-mutations-in <envs>` | Check declared request methods before a run. Outside the named, comma-separated environments, allow only `GET`, `HEAD`, and `OPTIONS` through this check. |
+| `--strict-scope` | Limit access to registered collections and workspaces. Keep data files inside their collection and create new collections inside a registered workspace. |
 | `--verbose` | Log debug info to stderr. |
 | `--help`, `-h` | Show help. |
 
 `bruno-mcp setup` is the separate install command described in [Set up from your terminal](#set-up-from-your-terminal); it takes `--client <id>` (`claude-code`, `claude-desktop`, `cursor`, `vscode`, `codex`; repeatable) and `--all`.
+
+The method check uses collection metadata before Bruno starts. GraphQL queries over `POST` require an exempt environment, and requests sent or changed by scripts fall outside the check. Use API credentials and network controls to enforce production access. Run overrides accept literal values. Bruno template expressions such as `{{baseUrl}}` are rejected.
 
 ## Test project workflows
 

@@ -94,7 +94,7 @@ describe('hardening policy', () => {
       collectionPath: collection, requestPath: 'auth/login.bru', environment: 'production'
     });
     expect(isError).toBe(true);
-    expect(body.error).toMatch(/Non-GET requests are allowed only in: testing/);
+    expect(body.error).toMatch(/require an allowed environment: testing/);
     const run = await callTool(client, 'run_collection', { collectionPath: collection, environment: 'production' });
     expect(run.isError).toBe(true);
     expect(hits).toHaveLength(0);
@@ -146,7 +146,9 @@ describe('hardening policy', () => {
   });
 
   it('get_environment hides token-named variables', async () => {
-    const { text } = await callTool(client, 'get_environment', { collectionPath: collection, name: 'testing' });
+    const { isError, body, text } = await callTool(client, 'get_environment', { collectionPath: collection, name: 'testing' });
+    expect(isError).toBe(false);
+    expect(body.variables).toContainEqual(expect.objectContaining({ name: 'accessToken', value: '<redacted>' }));
     expect(text).not.toContain(JWT);
   });
 });

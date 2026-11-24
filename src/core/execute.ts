@@ -69,7 +69,7 @@ const buildRunArgs = (
       }
       assertSafeArg(String(name), 'variable name');
       // Overrides are literal: interpolation here could pull {{process.env.*}} into a request.
-      if (String(value).includes('{{')) {
+      if (/\{\{[^}]+\}\}/.test(String(value))) {
         throw new Error(`variable "${name}" must be a literal value, not a {{template}}`);
       }
       args.push('--env-var', `${name}=${value}`);
@@ -84,7 +84,6 @@ const formatBody = (body: unknown): string | null => {
   return typeof body === 'string' ? body : JSON.stringify(body);
 };
 
-// With --redact, nothing secret-bearing leaves the server: headers, token keys, JWT/Bearer strings.
 const headersOut = (headers: unknown) => (getPolicy().redact ? redactHeaders(headers) : headers || null);
 const valueOut = <T>(value: T): T => (getPolicy().redact ? (redactDeep(value) as T) : value);
 const textOut = (text: string | null): string | null => (text != null && getPolicy().redact ? maskString(text) : text);
@@ -297,13 +296,17 @@ const PASSTHROUGH_ENV = new Set(
   ]
 );
 
-// On macOS and Linux `bru` starts the user's login shell at startup and copies in every variable it doesn't have
-// yet, which would bring back everything exported in ~/.zshrc or ~/.bashrc. This preload turns that off by
-// replacing @usebruno/requests' initializeShellEnv before `bru` loads it. A data: URL needs no file next to dist/.
-const NO_SHELL_ENV_PRELOAD = `data:text/javascript,${encodeURIComponent(
+const bruPreload = (modulePath: string, member: string, replacement: string): string => `data:text/javascript,${encodeURIComponent(
   "import { createRequire } from 'node:module';" +
-    `createRequire(${JSON.stringify(BRU_BIN)})('@usebruno/requests').initializeShellEnv = async () => ({});`
+    `const source = createRequire(${JSON.stringify(BRU_BIN)})(${JSON.stringify(modulePath)});` +
+    `if (typeof source.${member} !== 'function') throw new Error('Incompatible Bruno CLI: missing ${member}');` +
+    `source.${member} = ${replacement};`
 )}`;
+
+// Bruno loads the login shell on macOS and Linux, which would restore excluded environment variables.
+const NO_SHELL_ENV_PRELOAD = bruPreload('@usebruno/requests', 'initializeShellEnv', 'async () => ({})');
+// The pinned CLI applies in-memory updates separately from disk persistence.
+const NO_VARIABLE_PERSISTENCE_PRELOAD = bruPreload('../src/utils/persist-variables.js', 'persistVariableUpdates', '() => {}');
 
 let inheritEnv = false;
 
@@ -338,10 +341,13 @@ const runBru = async ({
   const reportPath = path.join(dir, `report-${crypto.randomBytes(8).toString('hex')}.json`);
   const args = [...buildRunArgs(paths, options, reportPath), ...extraArgs];
 
-  log.debug(`spawn: node ${BRU_BIN} ${args.join(' ')} (cwd=${collectionPath})`);
+  log.debug(`spawn: node ${BRU_BIN} run (cwd=${collectionPath})`);
 
   const stderrChunks: Buffer[] = [];
-  const preload = inheritEnv ? [] : ['--import', NO_SHELL_ENV_PRELOAD];
+  const preload = [
+    ...(inheritEnv ? [] : ['--import', NO_SHELL_ENV_PRELOAD]),
+    ...(getPolicy().readOnly ? ['--import', NO_VARIABLE_PERSISTENCE_PRELOAD] : [])
+  ];
   const child = spawn(process.execPath, [...preload, BRU_BIN, ...args], {
     cwd: collectionPath,
     env: bruEnv(),

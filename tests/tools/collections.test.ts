@@ -1,6 +1,10 @@
+import fs from 'node:fs';
+import path from 'node:path';
+
 import { afterAll, afterEach, beforeAll, describe, expect, it } from '@jest/globals';
 import type { Client } from '@modelcontextprotocol/sdk/client/index.js';
 
+import { setPolicy } from '../../src/core/policy.js';
 import { BRU_COLLECTION, ISOLATED_CONFIG, callTool, connectClient, copyCollection, makeTempDir, removeTempDirs, writeFiles } from '../helpers.js';
 
 const makeWorkspace = () =>
@@ -56,4 +60,30 @@ describe('list_collections', () => {
       }
     });
   });
+});
+
+it('applies strict scope to workspace discovery and collection creation', async () => {
+  const workspacePath = makeWorkspace();
+  const outsideWorkspace = makeWorkspace();
+  const outside = path.join(outsideWorkspace, 'new');
+  const inside = path.join(workspacePath, 'new');
+  setPolicy({ strictScope: true });
+  const scoped = await connectClient({ ...ISOLATED_CONFIG, explicitWorkspaces: [workspacePath] });
+  try {
+    expect((await callTool(client, 'list_collections', { workspacePath: outsideWorkspace })).isError).toBe(true);
+    const unknown = await callTool(client, 'list_requests', { collectionPath: outsideWorkspace });
+    expect(unknown.isError).toBe(true);
+    expect(unknown.body).not.toHaveProperty('collectionsInWorkspace');
+
+    expect((await callTool(scoped, 'create_collection', { name: 'Outside', outputPath: outside })).isError).toBe(true);
+    expect((await callTool(scoped, 'create_collection', { name: 'Outside', outputPath: outside, workspacePath })).isError).toBe(true);
+    expect(fs.existsSync(outside)).toBe(false);
+
+    const created = await callTool(scoped, 'create_collection', { name: 'New collection', outputPath: inside, workspacePath });
+    expect(created.isError).toBe(false);
+    expect((await callTool(scoped, 'list_requests', { collectionPath: inside })).body.total).toBe(0);
+  } finally {
+    setPolicy({});
+    await scoped.close();
+  }
 });

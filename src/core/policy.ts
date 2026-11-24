@@ -1,16 +1,15 @@
-// Hardening policy for running the server on behalf of an AI agent. Every flag is opt-in, except
-// assertSafeArg, which closes argv injection into `bru run` and always applies.
+// The policy flags are opt-in. CLI argument validation applies to every run.
 
 export interface Policy {
-  /** Register only the read and run tools; no tool writes, moves or deletes files. */
+  /** Hide authoring tools and suppress script variable persistence. */
   readOnly: boolean;
-  /** Strip secrets from everything a tool returns: headers, token-like JSON keys, JWT/Bearer strings. */
+  /** Hide execution headers and mask common credential patterns. */
   redact: boolean;
   /** Cap response bodies returned to the caller; 0 = no cap. */
   maxBodyChars: number;
-  /** Environments where non-GET requests may run; null = no restriction. */
+  /** Environments exempt from the declared-method check; null disables the check. */
   mutationEnvs: string[] | null;
-  /** Only collections passed via --collection/--workspace (or discovered) resolve; arbitrary paths don't. */
+  /** Limit access to registered collections and workspaces and confine data files to their collection. */
   strictScope: boolean;
 }
 
@@ -84,23 +83,24 @@ export const redactBody = (body: string | null): string | null => {
 
 const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
 
-export const isMutation = (method: string | null | undefined): boolean => !SAFE_METHODS.has(String(method || '').toUpperCase());
+export const requiresAllowedEnvironment = (method: string | null | undefined): boolean =>
+  !SAFE_METHODS.has(String(method || '').toUpperCase());
 
 // null when allowed, else the reason. A missing environment counts as not allowed.
-export const mutationBlockedReason = (environment: string | undefined, mutating: string[]): string | null => {
+export const mutationBlockedReason = (environment: string | undefined, findRestricted: () => string[]): string | null => {
   const { mutationEnvs } = current;
-  if (mutationEnvs === null || mutating.length === 0) return null;
-  if (environment && mutationEnvs.includes(environment)) return null;
+  if (mutationEnvs === null || (environment && mutationEnvs.includes(environment))) return null;
+  const restricted = findRestricted();
+  if (restricted.length === 0) return null;
   return (
-    `Refused: ${mutating.join(', ')} would send a non-GET request in environment "${environment ?? '(none)'}". ` +
-    `Non-GET requests are allowed only in: ${mutationEnvs.join(', ') || '(none)'}.`
+    `Refused by the declared-method check in environment "${environment ?? '(none)'}": ${restricted.join(', ')}. ` +
+    `Methods other than GET, HEAD, and OPTIONS, including unknown methods, require an allowed environment: ${mutationEnvs.join(', ') || '(none)'}.`
   );
 };
 
 // Every value placed in `bru run` argv must not be readable as an option (e.g. "--sandbox=developer").
 export const assertSafeArg = (value: string, what: string): void => {
-  const parts = String(value).split(/[\\/]/);
-  if (parts.some((part) => part.startsWith('-'))) {
-    throw new Error(`${what} must not start with "-" (in any path segment): ${value}`);
+  if (value.startsWith('-')) {
+    throw new Error(`${what} must not start with "-": ${value}`);
   }
 };

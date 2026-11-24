@@ -31,7 +31,7 @@ export const registerTools = (server: McpServer, ctx: ToolContext): void => {
   registerListFoldersTool(server, ctx);
   registerGetCollectionStatsTool(server, ctx);
 
-  // --read-only: nothing that writes, moves or deletes files, or adds scripts that later run.
+  // --read-only hides the authoring tools and leaves execution available.
   if (getPolicy().readOnly) return;
 
   registerSetEnvironmentVariableTool(server, ctx);

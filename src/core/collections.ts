@@ -71,9 +71,9 @@ export interface ResolvedRequestFile {
 }
 
 /** True when `child` sits under `parent`: not equal to it, and not reachable only via `..`. */
-const isInside = (parent: string, child: string): boolean => {
+export const isInside = (parent: string, child: string): boolean => {
   const rel = path.relative(parent, child);
-  return rel.length > 0 && !rel.startsWith('..') && !path.isAbsolute(rel);
+  return rel.length > 0 && rel !== '..' && !rel.startsWith(`..${path.sep}`) && !path.isAbsolute(rel);
 };
 
 // Case-insensitive, since macOS and Windows volumes resolve `Environments/` and `.GIT/` to the real folders.
@@ -172,13 +172,31 @@ export class CollectionRegistry {
     return this.config.explicitWorkspaces.some((w) => isSameDir(w, target));
   }
 
+  canAccessWorkspace(workspacePath: string): boolean {
+    if (this.scoped) return this.isConfiguredWorkspace(workspacePath);
+    if (!getPolicy().strictScope) return true;
+    const target = path.resolve(workspacePath);
+    return this.collections.some(({ workspacePath: registered }) =>
+      registered !== null && isSameDir(registered, target)
+    );
+  }
+
+  canCreateCollection(outputPath: string, workspacePath?: string): boolean {
+    if (!getPolicy().strictScope) return true;
+    this.refresh();
+    return !!workspacePath && this.canAccessWorkspace(workspacePath) &&
+      isInside(workspacePath, outputPath) && !isReservedPath(workspacePath, outputPath) &&
+      isInsideOnDisk(workspacePath, outputPath) && isInsideOnDisk(workspacePath, path.join(workspacePath, 'workspace.yml'));
+  }
+
   private find(collectionPath: string): RegisteredCollection | null {
     const target = path.resolve(String(collectionPath));
-    const configured =
-      this.collections.find((c) => c.path === target) ?? (this.scoped ? this.collections.find((c) => isSameDir(c.path, target)) : undefined);
+    const { strictScope } = getPolicy();
+    const configured = this.collections.find((c) => c.path === target) ??
+      (this.scoped || strictScope ? this.collections.find((c) => isSameDir(c.path, target)) : undefined);
     if (configured) return configured;
 
-    if (getPolicy().strictScope) return null;
+    if (strictScope) return null;
     if (this.scoped && ![...this.created].some((c) => isSameDir(c, target))) return null;
     if (!isCollectionDir(target)) return null;
     return {

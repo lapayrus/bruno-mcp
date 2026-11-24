@@ -18,6 +18,7 @@ export const registerCreateCollectionTool = (server: McpServer, { registry }: To
       description:
         'Create a new, empty collection on disk, with the same files the Bruno app writes. ' +
         'Optionally set a {{baseUrl}} collection variable and a description, and list the collection in a Bruno workspace. ' +
+        'Strict scope requires creating inside a registered workspace and passing its workspacePath. ' +
         'Pass the returned collectionPath to write_request to add requests.',
       inputSchema: {
         name: z.string().trim().min(1).describe('Collection name, as shown in Bruno.'),
@@ -47,6 +48,9 @@ export const registerCreateCollectionTool = (server: McpServer, { registry }: To
         return textResult({ error: `outputPath must be an absolute path: ${outputPath}` }, true);
       }
       const dir = path.resolve(outputPath);
+      if (!registry.canCreateCollection(dir, workspacePath)) {
+        return textResult({ error: 'Strict scope requires creating collections inside a registered workspace. Pass its path as workspacePath.' }, true);
+      }
       if (fs.existsSync(dir) && !isEmptyDir(dir)) {
         return textResult(
           {

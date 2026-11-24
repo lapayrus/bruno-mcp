@@ -199,7 +199,7 @@ const scanViaParse = (content: string, filePath: string, format: CollectionForma
   }
 };
 
-const scanRequest = (filePath: string, format: CollectionFormat): ScannedRequest | null => {
+export const scanRequest = (filePath: string, format: CollectionFormat): ScannedRequest | null => {
   let content: string;
   try {
     content = fs.readFileSync(filePath, 'utf8');
